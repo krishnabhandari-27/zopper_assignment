@@ -29,47 +29,46 @@ SELECT * FROM claims_data;
 
 
 -- 1. Calculate the total premium collected during the year 2024. 
-SELECT SUM(Premium) AS Total_Premium
-FROM policy_sales;
+SELECT SUM(premium) AS total_premium_2024
+FROM policy_sales_data
+WHERE YEAR(policy_start_date) = 2024;
 -- 2. Calculate the total claim cost for each year (2025 and 2026) with a monthly breakdown. 
-SELECT  
-EXTRACT(YEAR FROM Claim_Date) AS Year,
-EXTRACT(MONTH FROM Claim_Date) AS Month,
-SUM(Claim_Amount) AS Total_Claims
+SELECT 
+    YEAR(claim_date) AS year,
+    MONTH(claim_date) AS month,
+    SUM(claim_amount) AS total_claim_cost
 FROM claims_data
-GROUP BY 
-EXTRACT(YEAR FROM Claim_Date),
-EXTRACT(MONTH FROM Claim_Date)
-ORDER BY Year, Month;
+WHERE YEAR(claim_date) IN (2025, 2026)
+GROUP BY YEAR(claim_date), MONTH(claim_date)
+ORDER BY year, month;
 -- 3. Calculate the claim cost to premium ratio for each policy tenure (1, 2, 3, and 4 years). 
 SELECT 
-p.Policy_Tenure,
-SUM(c.Claim_Amount) AS Total_Claims,
-SUM(p.Premium) AS Total_Premium,
-SUM(c.Claim_Amount) / SUM(p.Premium) AS Claim_Premium_Ratio
-FROM policy_sales p
-JOIN claims_data c
-ON p.Vehicle_ID = c.Vehicle_ID
-GROUP BY p.Policy_Tenure;
+    p.policy_tenure_years,
+    SUM(c.claim_amount) / SUM(p.premium) AS claim_to_premium_ratio
+FROM policy_sales_data p
+LEFT JOIN claims_data c 
+    ON p.policy_id = c.policy_id
+GROUP BY p.policy_tenure_years
+ORDER BY p.policy_tenure_years;
 -- 4. Calculate the claim cost to premium ratio by the month in which the policy was sold 
 -- (January–December 2024). 
 SELECT 
-EXTRACT(MONTH FROM p.Policy_Purchase_Date) AS Sale_Month,
-SUM(c.Claim_Amount) AS Total_Claims,
-SUM(p.Premium) AS Total_Premium,
-SUM(c.Claim_Amount) / SUM(p.Premium) AS Ratio
-FROM policy_sales p
-JOIN claims_data c
-ON p.Vehicle_ID = c.Vehicle_ID
-GROUP BY EXTRACT(MONTH FROM p.Policy_Purchase_Date)
-ORDER BY Sale_Month;
+    MONTH(p.policy_start_date) AS month,
+    SUM(c.claim_amount) / SUM(p.premium) AS ratio
+FROM policy_sales_data p
+LEFT JOIN claims_data c 
+    ON p.policy_id = c.policy_id
+WHERE YEAR(p.policy_start_date) = 2024
+GROUP BY MONTH(p.policy_start_date)
+ORDER BY month;
 -- 5. If every vehicle that has not yet made a claim eventually files exactly one claim during the 
 -- remaining policy tenure, estimate the total potential claim liability. 
 SELECT 
-(COUNT(*) - COUNT(c.Vehicle_ID)) * 10000 AS Potential_Liability
-FROM policy_sales p
-LEFT JOIN claims_data c
-ON p.Vehicle_ID = c.Vehicle_ID;
+    SUM(p.premium) AS estimated_liability
+FROM policy_sales_data p
+LEFT JOIN claims_data c 
+    ON p.policy_id = c.policy_id
+WHERE c.policy_id IS NULL;
 -- 6. Assume daily premium = Total Premium ÷ Total Policy Tenure Days. Based on this: 
 -- (i) Calculate the premium already earned by the company up to February 28, 2026. 
 -- (ii) Estimate the premium expected to be earned monthly for the remaining policy period 
@@ -77,28 +76,18 @@ ON p.Vehicle_ID = c.Vehicle_ID;
 
 --(i)
 SELECT 
-SUM(CASE WHEN Policy_Start_Date <= '2026-02-28' 
-THEN ('2026-02-28'::date - Policy_Start_Date)
-ELSE 0
-END
-) 
-*
-(SUM(Premium) / SUM(Policy_Tenure * 365)) 
-AS earned_premium
-FROM policy_sales;
+    SUM(
+        (DATEDIFF(LEAST('2026-02-28', policy_end_date), policy_start_date) + 1)
+        / (DATEDIFF(policy_end_date, policy_start_date) + 1)
+        * premium
+    ) AS earned_premium
+FROM policy_sales_data
+WHERE policy_start_date <= '2026-02-28';
 
 --(ii)
 SELECT 
-(
-SUM(Premium) - 
-(
-SUM(
-CASE 
-WHEN Policy_Start_Date <= '2026-02-28'
-THEN ('2026-02-28'::date - Policy_Start_Date)
-ELSE 0
-END
-) 
+    SUM(premium) / 46 AS monthly_expected_premium
+FROM policy_sales_data;
 *
 (SUM(Premium) / SUM(Policy_Tenure * 365))
 )
